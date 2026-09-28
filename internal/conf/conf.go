@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"mirage/internal/proto"
@@ -60,12 +61,22 @@ type ClientConfig struct {
 // every connection does a real TLS handshake, then either the inner tunnel
 // handshake or, for anyone else, the cover website.
 type ServerConfig struct {
-	// Public listener, e.g. ":443".
-	Listen string `json:"listen"`
+	// Public host clients connect to (domain or IP), used when generating
+	// client configs. When empty the inbound's domain is used instead.
+	Host string `json:"host"`
 
-	// TLS certificate for the server domain and its private key, PEM files.
-	TLSCert string `json:"tls_cert"`
-	TLSKey  string `json:"tls_key"`
+	// Listening endpoints. Each inbound has its own address, domain and
+	// certificate, and serves the same tunnel. When left empty a single
+	// inbound is built from the legacy fields below.
+	Inbounds []InboundConfig `json:"inbounds"`
+
+	// Legacy single-inbound fields, still understood when "inbounds" is empty.
+	Listen     string `json:"listen"`
+	Domain     string `json:"domain"`
+	TLSCert    string `json:"tls_cert"`
+	TLSKey     string `json:"tls_key"`
+	CoverDir   string `json:"cover_dir"`
+	CoverProxy string `json:"cover_proxy"`
 
 	// Address pool handed out to clients, inside TunnelCIDR.
 	TunnelCIDR string `json:"tunnel_cidr"` // e.g. "10.7.0.0/24"
@@ -90,13 +101,34 @@ type ServerConfig struct {
 
 	// Static X25519 private key of the server (base64, 32 bytes).
 	X25519Priv string `json:"x25519_priv"`
+}
 
-	// Directory served as a cover website to anything that is not an
-	// authenticated client (probes, scanners). Optional.
-	CoverDir string `json:"cover_dir"`
+// InboundConfig is one listening endpoint of the server.
+type InboundConfig struct {
+	ID         string `json:"id"`          // short name, used by the admin tool
+	Listen     string `json:"listen"`      // e.g. ":443"
+	Domain     string `json:"domain"`      // SNI and certificate name
+	TLSCert    string `json:"tls_cert"`    // PEM file
+	TLSKey     string `json:"tls_key"`     // PEM file
+	CoverDir   string `json:"cover_dir"`   // optional static cover site
+	CoverProxy string `json:"cover_proxy"` // optional cover reverse proxy
+}
 
-	// Optional upstream to reverse-proxy as the cover site.
-	CoverProxy string `json:"cover_proxy"`
+// Inbounds returns the configured endpoints, falling back to the legacy
+// single-inbound fields when "inbounds" is empty.
+func (c *ServerConfig) InboundsOrDefault() []InboundConfig {
+	if len(c.Inbounds) > 0 {
+		return c.Inbounds
+	}
+	return []InboundConfig{{
+		ID:         "default",
+		Listen:     c.Listen,
+		Domain:     c.Domain,
+		TLSCert:    c.TLSCert,
+		TLSKey:     c.TLSKey,
+		CoverDir:   c.CoverDir,
+		CoverProxy: c.CoverProxy,
+	}}
 }
 
 // Load reads and validates a JSON config file. Relative paths inside the config
@@ -118,6 +150,11 @@ func Load(path string, v interface{}) error {
 		c.TLSCert = resolvePath(dir, c.TLSCert)
 		c.TLSKey = resolvePath(dir, c.TLSKey)
 		c.CoverDir = resolvePath(dir, c.CoverDir)
+		for i := range c.Inbounds {
+			c.Inbounds[i].TLSCert = resolvePath(dir, c.Inbounds[i].TLSCert)
+			c.Inbounds[i].TLSKey = resolvePath(dir, c.Inbounds[i].TLSKey)
+			c.Inbounds[i].CoverDir = resolvePath(dir, c.Inbounds[i].CoverDir)
+		}
 		return c.Validate()
 	}
 	return errors.New("conf: unknown config type")
@@ -172,11 +209,26 @@ func (c *ClientConfig) Validate() error {
 
 // Validate checks the server config.
 func (c *ServerConfig) Validate() error {
-	if c.Listen == "" {
-		return errors.New("listen is required")
+	inbounds := c.InboundsOrDefault()
+	if len(inbounds) == 0 {
+		return errors.New("no inbound: set \"listen\" or \"inbounds\"")
 	}
-	if c.TLSCert == "" || c.TLSKey == "" {
-		return errors.New("tls_cert and tls_key are required")
+	seen := map[string]bool{}
+	for i := range inbounds {
+		in := &inbounds[i]
+		if in.ID == "" {
+			in.ID = "inbound" + strconv.Itoa(i)
+		}
+		if seen[in.ID] {
+			return fmt.Errorf("duplicate inbound id: %s", in.ID)
+		}
+		seen[in.ID] = true
+		if in.Listen == "" {
+			return fmt.Errorf("inbound %q: listen is required", in.ID)
+		}
+		if in.TLSCert == "" || in.TLSKey == "" {
+			return fmt.Errorf("inbound %q: tls_cert and tls_key are required", in.ID)
+		}
 	}
 	if c.TunnelCIDR == "" {
 		return errors.New("tunnel_cidr is required")

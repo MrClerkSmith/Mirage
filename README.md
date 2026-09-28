@@ -85,6 +85,54 @@ sudo deploy/server-nat.sh down    # отключить
 
 Systemd-юнит `deploy/mirage-server.service` вызывает этот скрипт автоматически.
 
+## Развёртывание одной командой
+
+На Linux-сервере всё ставится автоматически — скрипт сам определит дистрибутив,
+обновит систему, поставит Go, склонирует репозиторий, соберёт бинари и
+поставит systemd-сервис:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MrClerkSmith/Mirage/main/deploy/install.sh | sudo sh
+```
+
+Что он делает: `apt`/`dnf`/`pacman`/`apk` → обновление и установка git, curl,
+iptables; официальный тарбол Go, если системного Go нет или он старше 1.23;
+сборка `/usr/local/bin/mirage` и `/usr/local/bin/mirage-admin`; ключи и
+конфиги в `/etc/mirage`; открытие 443/tcp в firewall; включение сервиса
+`mirage-server`. В конце спросит домен и публичный адрес и запустит keygen.
+
+## Управление: TUI
+
+Клиентов и входящие конечные точки (inbound) удобно создавать через терминальный
+интерфейс:
+
+```sh
+sudo mirage-admin -c /etc/mirage/server.json
+```
+
+```
+Mirage admin
+config: /etc/mirage/server.json
+
+Main menu
+> Clients (1)
+  Inbounds (1)
+  Save & exit
+  Quit without saving
+
+↑↓ move · enter open · q quit
+```
+
+* **Clients** — список PSK-записей: `a` создать клиента (генерит PSK),
+  `d` удалить, `e` выгрузить готовый `clients/<id>.json` для выбранного inbound.
+* **Inbounds** — список слушателей: `a` добавить (id, домен, адрес — сертификат
+  для домена генерируется автоматически), `d` удалить. Каждый inbound — это
+  отдельный порт/домен с собственным сертификатом, ведущий в тот же туннель;
+  удобно разнести клиентов по разным SNI.
+
+Изменения пишутся на диск только через «Save & exit». Если `server.json` ещё не
+существует, TUI спросит хост и домен и создаст всё с нуля.
+
 ## Режимы клиента
 
 * `"mode": "tun"` (по умолчанию) — IP-уровень, виртуальный интерфейс, работает
@@ -149,6 +197,7 @@ Systemd-юнит `deploy/mirage-server.service` вызывает этот скр
 
 ```
 cmd/mirage            бинарий: keygen | client | server
+cmd/mirage-admin      терминальный интерфейс управления сервером
 internal/proto        константы протокола
 internal/hkdf         HKDF-SHA256 (без внешних зависимостей)
 internal/record       AEAD-кадры, реконструкция ключей, padding
@@ -161,10 +210,11 @@ internal/socks        SOCKS5-сервер
 internal/dns          встроенный DNS-релей
 internal/cover        cover-сайт для проб и посторонних
 internal/server       сервер: пул IP, таблица сессий, TUN-роутинг
+internal/admin        хранилище конфига + TUI (клиенты и inbound)
 internal/client       клиент с автореконнектом
 internal/certs        генерация CA и сертификатов
 internal/conf         JSON-конфиги обеих ролей
-deploy                NAT-скрипт и systemd-юнит
+deploy                install.sh, NAT-скрипт и systemd-юнит
 examples              примеры конфигов
 ```
 

@@ -29,20 +29,26 @@ import (
 	"mirage/internal/tunmgr"
 )
 
-// Server is the running hidden endpoint.
+// Server is the running public endpoint.
 type Server struct {
 	cfg        *conf.ServerConfig
-	tlsConf    *tls.Config
 	staticPriv *ecdh.PrivateKey
 	psks       map[string][]byte
 	tun        *tunmgr.Device
-	cover      *cover.Site
 	serverAddr string // address of the server itself on the virtual link
 	prefix     int
+	inbounds   []inbound
 
 	mu       sync.Mutex
 	sessions map[string]*session.Server
 	pool     *ipPool
+}
+
+// inbound is one listening endpoint with its own certificate and cover site.
+type inbound struct {
+	cfg   conf.InboundConfig
+	tls   *tls.Config
+	cover *cover.Site
 }
 
 // New prepares the server but does not touch the network yet.
@@ -60,10 +66,6 @@ func New(cfg *conf.ServerConfig) (*Server, error) {
 		return nil, err
 	}
 	staticPriv, err := ecdh.X25519().NewPrivateKey(privBytes)
-	if err != nil {
-		return nil, err
-	}
-	tlsConf, err := tlscam.ServerConfig(cfg.TLSCert, cfg.TLSKey)
 	if err != nil {
 		return nil, err
 	}
@@ -88,17 +90,25 @@ func New(cfg *conf.ServerConfig) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	site, err := cover.New(cfg.CoverDir, cfg.CoverProxy)
-	if err != nil {
-		return nil, err
+
+	inbounds := make([]inbound, 0, len(cfg.InboundsOrDefault()))
+	for _, ic := range cfg.InboundsOrDefault() {
+		tlsConf, err := tlscam.ServerConfig(ic.TLSCert, ic.TLSKey)
+		if err != nil {
+			return nil, err
+		}
+		site, err := cover.New(ic.CoverDir, ic.CoverProxy)
+		if err != nil {
+			return nil, err
+		}
+		inbounds = append(inbounds, inbound{cfg: ic, tls: tlsConf, cover: site})
 	}
 
 	return &Server{
 		cfg:        cfg,
-		tlsConf:    tlsConf,
 		staticPriv: staticPriv,
 		psks:       psks,
-		cover:      site,
+		inbounds:   inbounds,
 		serverAddr: serverIP.String(),
 		prefix:     prefix,
 		sessions:   make(map[string]*session.Server),
@@ -126,11 +136,22 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		}()
 	}
 
-	ln, err := net.Listen("tcp", s.cfg.Listen)
+	// One listener per inbound; they all feed the same tunnel.
+	errs := make(chan error, len(s.inbounds))
+	for _, ib := range s.inbounds {
+		go func(ib inbound) { errs <- s.serve(ctx, ib) }(ib)
+	}
+	return <-errs
+}
+
+// serve listens on one inbound and hands connections to handle until the
+// context is cancelled.
+func (s *Server) serve(ctx context.Context, ib inbound) error {
+	ln, err := net.Listen("tcp", ib.cfg.Listen)
 	if err != nil {
 		return err
 	}
-	log.Printf("server: listening on %s (tunnel SNI %s)", s.cfg.Listen, s.tlsConf.ServerName)
+	log.Printf("server: inbound %q on %s (domain %s)", ib.cfg.ID, ib.cfg.Listen, ib.cfg.Domain)
 
 	go func() {
 		<-ctx.Done()
@@ -145,14 +166,14 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			}
 			return err
 		}
-		go s.handle(c)
+		go s.handle(c, ib)
 	}
 }
 
-func (s *Server) handle(conn net.Conn) {
+func (s *Server) handle(conn net.Conn, ib inbound) {
 	defer conn.Close()
 
-	tlsConn := tls.Server(conn, s.tlsConf)
+	tlsConn := tls.Server(conn, ib.tls)
 	if err := tlsConn.Handshake(); err != nil {
 		return
 	}
@@ -163,7 +184,7 @@ func (s *Server) handle(conn net.Conn) {
 	}, s.cfg.PadMin, s.cfg.RekeyRecords)
 	if err == handshake.ErrNotTunnel {
 		// An ordinary TLS client or an active probe: serve the website.
-		s.cover.ServeExisting(tlsConn, peeked)
+		ib.cover.ServeExisting(tlsConn, peeked)
 		return
 	}
 	if err != nil {

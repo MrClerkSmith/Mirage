@@ -1,7 +1,16 @@
 {
-  "listen": ":443",
-  "tls_cert": "server.pem",
-  "tls_key": "server-key.pem",
+  "host": "203.0.113.10",
+  "inbounds": [
+    {
+      "id": "main",
+      "listen": ":443",
+      "domain": "example.com",
+      "tls_cert": "server.pem",
+      "tls_key": "server-key.pem",
+      "cover_dir": "",
+      "cover_proxy": ""
+    }
+  ],
   "tunnel_cidr": "10.7.0.0/24",
   "ip_start": "10.7.0.2",
   "ip_end": "10.7.0.254",
@@ -13,7 +22,5 @@
   "rekey_records": 1048576,
   "idle_ping_sec": 30,
   "psks": { "REPLACE_WITH_PSK_ID": "REPLACE_WITH_BASE64_PSK" },
-  "x25519_priv": "REPLACE_WITH_BASE64_STATIC_PRIVKEY",
-  "cover_dir": "",
-  "cover_proxy": ""
+  "x25519_priv": "REPLACE_WITH_BASE64_STATIC_PRIVKEY"
 }

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 
@@ -112,9 +113,14 @@ func Generate(o Options) error {
 		RekeyRecords:     1 << 20,
 	}
 	serverConf := conf.ServerConfig{
-		Listen:       o.ServerListen,
-		TLSCert:      "server.pem",
-		TLSKey:       "server-key.pem",
+		Host: hostOf(o.ServerAddr),
+		Inbounds: []conf.InboundConfig{{
+			ID:       "main",
+			Listen:   o.ServerListen,
+			Domain:   o.Domain,
+			TLSCert:  "server.pem",
+			TLSKey:   "server-key.pem",
+		}},
 		TunnelCIDR:   o.TunnelCIDR,
 		IPStart:      "10.7.0.2",
 		IPEnd:        "10.7.0.254",
@@ -127,8 +133,6 @@ func Generate(o Options) error {
 		IdlePingSec:  30,
 		PSKs:         map[string]string{id: base64.StdEncoding.EncodeToString(psk)},
 		X25519Priv:   base64.StdEncoding.EncodeToString(static.Bytes()),
-		CoverDir:     "",
-		CoverProxy:   "",
 	}
 
 	for name, v := range map[string]interface{}{
@@ -155,4 +159,12 @@ func Generate(o Options) error {
 	log.Printf("keygen: set server_addr (%s) to the real host before running the client",
 		o.ServerAddr)
 	return nil
+}
+
+// hostOf strips the port from a "host:port" address.
+func hostOf(addr string) string {
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		return h
+	}
+	return addr
 }
