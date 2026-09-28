@@ -1,0 +1,18 @@
+{
+  "mode": "tun",
+  "decoy_addr": "203.0.113.10:443",
+  "decoy_domain": "decoy.example.com",
+  "psk": "REPLACE_WITH_BASE64_PSK_FROM_psks",
+  "psk_id": "REPLACE_WITH_PSK_ID",
+  "server_x25519_pub": "REPLACE_WITH_BASE64_STATIC_PUBKEY",
+  "server_cert_sha256": "REPLACE_WITH_HEX_SHA256_OF_server.pem",
+  "tun_name": "mirage0",
+  "mtu": 1400,
+  "socks_listen": "127.0.0.1:1080",
+  "routes": ["10.7.0.0/24"],
+  "default_route": false,
+  "dns_via_tunnel": false,
+  "idle_ping_sec": 30,
+  "pad_min": 0,
+  "rekey_records": 1048576
+}

@@ -1,0 +1,9 @@
+{
+  "listen": ":443",
+  "tunnel_domain": "decoy.example.com",
+  "server_addr": "10.0.0.2:8443",
+  "cover_cert": "",
+  "cover_key": "",
+  "cover_dir": "",
+  "cover_proxy": ""
+}

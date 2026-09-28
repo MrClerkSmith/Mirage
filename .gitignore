@@ -1,0 +1,29 @@
+# Compiled binary
+/mirage
+/mirage.exe
+*.exe
+
+# keygen output: contains the internal CA, the server key and the PSK.
+# Never commit this directory.
+/keys/
+psk.txt
+
+# Key material in general
+*.pem
+*.key
+
+# Go build/test artifacts
+*.test
+*.out
+/vendor/
+
+# Logs
+*.log
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

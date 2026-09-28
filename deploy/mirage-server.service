@@ -1,0 +1,21 @@
+[Unit]
+Description=Mirage hidden VPN server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/etc/mirage
+ExecStart=/usr/local/bin/mirage server -c /etc/mirage/server.json
+ExecStartPost=/etc/mirage/server-nat.sh up
+ExecStopPost=/etc/mirage/server-nat.sh down
+Restart=on-failure
+RestartSec=3
+# The server should only ever receive traffic from the decoy.
+IPAddressDeny=any
+IPAddressAllow=localhost
+# ...plus the decoy host, e.g.:
+# IPAddressAllow=203.0.113.10
+
+[Install]
+WantedBy=multi-user.target
