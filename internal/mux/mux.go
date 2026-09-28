@@ -76,9 +76,9 @@ func encodeClose(id uint32, flags byte) []byte {
 
 // ClientMux turns record-stream frames into virtual net.Conns.
 type ClientMux struct {
-	fc    *record.FramedConn
-	mu    sync.Mutex
-	conns map[uint32]*Conn
+	fc     *record.FramedConn
+	mu     sync.Mutex
+	conns  map[uint32]*Conn
 	nextID uint32
 	closed bool
 }
@@ -261,8 +261,8 @@ func (c *Conn) shutdown() {
 	c.once.Do(func() { close(c.done) })
 }
 
-func (c *Conn) LocalAddr() net.Addr  { return dummyAddr{} }
-func (c *Conn) RemoteAddr() net.Addr { return dummyAddr{} }
+func (c *Conn) LocalAddr() net.Addr                { return dummyAddr{} }
+func (c *Conn) RemoteAddr() net.Addr               { return dummyAddr{} }
 func (c *Conn) SetDeadline(t time.Time) error      { return nil }
 func (c *Conn) SetReadDeadline(t time.Time) error  { return nil }
 func (c *Conn) SetWriteDeadline(t time.Time) error { return nil }

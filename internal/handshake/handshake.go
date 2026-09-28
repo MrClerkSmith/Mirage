@@ -47,8 +47,8 @@ var authInitInfo = []byte("MIRAGE-AUTHINIT")
 
 // ClientParams are the client-side secrets and pinned server material.
 type ClientParams struct {
-	PSK            []byte
-	PSKID          string
+	PSK             []byte
+	PSKID           string
 	ServerX25519Pub *ecdh.PublicKey // pinned static key of the hidden server
 }
 
@@ -282,4 +282,3 @@ func replayOK(pub []byte, ts int64) bool {
 	replaySeen[k] = now + 600
 	return true
 }
-

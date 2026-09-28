@@ -16,6 +16,9 @@ psk.txt
 *.test
 *.out
 /vendor/
+.gocache/
+.gomodcache/
+.gopath/
 
 # Logs
 *.log

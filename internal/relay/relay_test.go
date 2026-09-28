@@ -23,11 +23,11 @@ const testDomain = "decoy.test"
 // testMaterial builds a self-signed certificate for the decoy domain plus the
 // static X25519 key and PSK used by the hidden server.
 type testMaterial struct {
-	cert         tls.Certificate
-	fingerprint  string
-	staticPriv   *ecdh.PrivateKey
-	staticPub    *ecdh.PublicKey
-	psk          []byte
+	cert        tls.Certificate
+	fingerprint string
+	staticPriv  *ecdh.PrivateKey
+	staticPub   *ecdh.PublicKey
+	psk         []byte
 }
 
 func newMaterial(t *testing.T) *testMaterial {
@@ -144,8 +144,8 @@ func TestEndToEndTunnel(t *testing.T) {
 	}
 
 	fc, info, err := handshake.Client(tlsConn, handshake.ClientParams{
-		PSK:            m.psk,
-		PSKID:          "client1",
+		PSK:             m.psk,
+		PSKID:           "client1",
 		ServerX25519Pub: m.staticPub,
 	}, 0, 0)
 	if err != nil {
@@ -223,8 +223,8 @@ func TestWrongPSK(t *testing.T) {
 	copy(wrong, m.psk)
 	wrong[0] ^= 0xFF
 	_, _, err = handshake.Client(tlsConn, handshake.ClientParams{
-		PSK:            wrong,
-		PSKID:          "client1",
+		PSK:             wrong,
+		PSKID:           "client1",
 		ServerX25519Pub: m.staticPub,
 	}, 0, 0)
 	if err == nil {

@@ -20,9 +20,9 @@ import (
 )
 
 const (
-	connectTimeout   = 15 * time.Second
-	reconnectBase    = 2 * time.Second
-	reconnectMax     = 60 * time.Second
+	connectTimeout = 15 * time.Second
+	reconnectBase  = 2 * time.Second
+	reconnectMax   = 60 * time.Second
 )
 
 // Client owns one configured tunnel.
@@ -100,8 +100,8 @@ func (c *Client) connect(ctx context.Context) error {
 	}
 
 	fc, info, err := handshake.Client(tlsConn, handshake.ClientParams{
-		PSK:            psk,
-		PSKID:          c.cfg.PSKID,
+		PSK:             psk,
+		PSKID:           c.cfg.PSKID,
 		ServerX25519Pub: serverPub,
 	}, c.cfg.PadMin, c.cfg.RekeyRecords)
 	if err != nil {

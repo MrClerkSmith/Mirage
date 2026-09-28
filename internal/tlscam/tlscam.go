@@ -173,9 +173,9 @@ func drainBuffered(br *bufio.Reader, buf *bytes.Buffer) []byte {
 // right after the 4-byte handshake header).
 func parseClientHello(ch []byte) (string, error) {
 	c := &cursor{b: ch}
-	c.u16()          // legacy_version
-	c.bytes(32)      // random
-	c.bytes(int(c.u8())) // legacy_session_id
+	c.u16()               // legacy_version
+	c.bytes(32)           // random
+	c.bytes(int(c.u8()))  // legacy_session_id
 	c.bytes(int(c.u16())) // cipher_suites
 	c.bytes(int(c.u8()))  // legacy_compression_methods
 	if c.err != nil {

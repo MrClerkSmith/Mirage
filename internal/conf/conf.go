@@ -52,9 +52,9 @@ type ClientConfig struct {
 	SOCKSListen string `json:"socks_listen"`
 
 	// Traffic-shape knobs.
-	IdlePingSec  int `json:"idle_ping_sec"`   // keepalive, 0 disables
-	PadMin       int `json:"pad_min"`         // minimum record size (0 = off)
-	RekeyRecords int `json:"rekey_records"`   // rekey every N records, 0 = never
+	IdlePingSec  int `json:"idle_ping_sec"` // keepalive, 0 disables
+	PadMin       int `json:"pad_min"`       // minimum record size (0 = off)
+	RekeyRecords int `json:"rekey_records"` // rekey every N records, 0 = never
 }
 
 // ServerConfig configures the hidden VPN server.
@@ -83,9 +83,9 @@ type ServerConfig struct {
 	MTU     int    `json:"mtu"`
 
 	// Traffic-shape knobs, should mirror the client.
-	PadMin       int               `json:"pad_min"`
-	RekeyRecords int               `json:"rekey_records"`
-	IdlePingSec  int               `json:"idle_ping_sec"`
+	PadMin       int `json:"pad_min"`
+	RekeyRecords int `json:"rekey_records"`
+	IdlePingSec  int `json:"idle_ping_sec"`
 
 	// psk_id -> base64 PSK.
 	PSKs map[string]string `json:"psks"`

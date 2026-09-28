@@ -11,11 +11,11 @@
 //
 //	[type(1)] [payload] [padding] [pad_len(1)]
 //
-// - type is hidden from the DPI (it is encrypted).
-// - pad_len mirrors TLS 1.3 record padding so frames can be padded to a
-//   minimum size, blunting size-based traffic analysis.
-// - The AEAD nonce is base_nonce XOR sequence_number, exactly like TLS 1.3 and
-//   QUIC, so no random bytes are spent on the wire.
+//   - type is hidden from the DPI (it is encrypted).
+//   - pad_len mirrors TLS 1.3 record padding so frames can be padded to a
+//     minimum size, blunting size-based traffic analysis.
+//   - The AEAD nonce is base_nonce XOR sequence_number, exactly like TLS 1.3 and
+//     QUIC, so no random bytes are spent on the wire.
 //
 // Both directions keep their own sequence counter; when a counter crosses a
 // configured threshold the key and nonce base are rotated through HKDF, which
@@ -157,9 +157,9 @@ func (s *Stream) nonce(seq uint64) []byte {
 
 // FramedConn is a net.Conn speaking the record protocol.
 type FramedConn struct {
-	raw    net.Conn
-	send   *Stream
-	recv   *Stream
+	raw     net.Conn
+	send    *Stream
+	recv    *Stream
 	writeMu sync.Mutex // guards WriteRecord against concurrent writers
 }
 
