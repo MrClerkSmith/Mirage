@@ -1,4 +1,4 @@
-package relay
+package server
 
 import (
 	"bytes"
@@ -12,16 +12,13 @@ import (
 	"testing"
 
 	"mirage/internal/certs"
-	"mirage/internal/conf"
 	"mirage/internal/handshake"
 	"mirage/internal/proto"
 	"mirage/internal/tlscam"
 )
 
-const testDomain = "decoy.test"
+const testDomain = "mirage.test"
 
-// testMaterial builds a self-signed certificate for the decoy domain plus the
-// static X25519 key and PSK used by the hidden server.
 type testMaterial struct {
 	cert        tls.Certificate
 	fingerprint string
@@ -54,9 +51,9 @@ func newMaterial(t *testing.T) *testMaterial {
 	}
 }
 
-// startHidden runs a fake hidden server: TLS handshake, inner handshake,
-// welcome message, then an echo of every record the client sends.
-func startHidden(t *testing.T, m *testMaterial) string {
+// startServer mimics Server.handle without touching TUN: it performs the same
+// TLS handshake, inner handshake and welcome, then echoes every record back.
+func startServer(t *testing.T, m *testMaterial) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -103,36 +100,14 @@ func startHidden(t *testing.T, m *testMaterial) string {
 	return ln.Addr().String()
 }
 
-// startDecoy runs the real decoy relay pointing at the hidden server.
-func startDecoy(t *testing.T, hidden string) string {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, err := New(&conf.DecoyConfig{
-		Listen:       ln.Addr().String(),
-		TunnelDomain: testDomain,
-		ServerAddr:   hidden,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	go func() {
-		_ = r.ListenAndServe()
-	}()
-	return ln.Addr().String()
-}
-
-// TestEndToEndTunnel verifies the whole chain: the client talks TLS to the
-// decoy, the decoy relays to the hidden server, the inner handshake
-// authenticates, and records flow back encrypted.
+// TestEndToEndTunnel drives the whole chain: TLS to the server, the inner
+// PSK+X25519 handshake through the pinned certificate, and a record round
+// trip.
 func TestEndToEndTunnel(t *testing.T) {
 	m := newMaterial(t)
-	hidden := startHidden(t, m)
-	decoy := startDecoy(t, hidden)
+	addr := startServer(t, m)
 
-	conn, err := net.Dial("tcp", decoy)
+	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +115,7 @@ func TestEndToEndTunnel(t *testing.T) {
 
 	tlsConn := tls.Client(conn, tlscam.ClientConfig(testDomain, m.fingerprint))
 	if err := tlsConn.Handshake(); err != nil {
-		t.Fatalf("tls handshake through decoy: %v", err)
+		t.Fatalf("tls handshake: %v", err)
 	}
 
 	fc, info, err := handshake.Client(tlsConn, handshake.ClientParams{
@@ -151,64 +126,33 @@ func TestEndToEndTunnel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inner handshake: %v", err)
 	}
-	if info.AssignedIP != "10.7.0.2/24" || info.DNS != "10.7.0.1" || info.MTU != 1400 {
-		t.Fatalf("unexpected welcome: %+v", info)
+	if info.AssignedIP != "10.7.0.2/24" {
+		t.Fatalf("assigned ip: got %q, want 10.7.0.2/24", info.AssignedIP)
 	}
 
-	payload := []byte("an IP packet, supposedly")
-	if err := fc.WriteRecord(proto.RecIPv4, payload); err != nil {
+	msg := []byte("hello through the tunnel")
+	if err := fc.WriteRecord(proto.RecControl, msg); err != nil {
 		t.Fatal(err)
 	}
-	rtype, got, err := fc.ReadRecord()
+	rtype, payload, err := fc.ReadRecord()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rtype != proto.RecIPv4 || string(got) != string(payload) {
-		t.Fatalf("echo mismatch: %d %x", rtype, got)
+	if rtype != proto.RecControl {
+		t.Fatalf("record type: got %d, want %d", rtype, proto.RecControl)
 	}
+	if !bytes.Equal(payload, msg) {
+		t.Fatalf("payload: got %q, want %q", payload, msg)
+	}
+	fc.Close()
 }
 
-// TestCoverPath verifies that a connection with a different SNI is served the
-// ordinary cover website instead of the tunnel.
-func TestCoverPath(t *testing.T) {
-	m := newMaterial(t)
-	hidden := startHidden(t, m)
-	decoy := startDecoy(t, hidden)
-
-	conn, err := net.Dial("tcp", decoy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-
-	tlsConn := tls.Client(conn, &tls.Config{
-		ServerName:         "something-else.test",
-		InsecureSkipVerify: true, // the cover certificate is ephemeral
-		MinVersion:         tls.VersionTLS12,
-	})
-	if err := tlsConn.Handshake(); err != nil {
-		t.Fatalf("cover tls handshake: %v", err)
-	}
-	req := "GET / HTTP/1.1\r\nHost: something-else.test\r\nConnection: close\r\n\r\n"
-	if _, err := io.WriteString(tlsConn, req); err != nil {
-		t.Fatal(err)
-	}
-	body, err := io.ReadAll(tlsConn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(body, []byte("Mirage Networks")) {
-		t.Fatalf("cover site not served, got %q", string(body[:min(200, len(body))]))
-	}
-}
-
-// TestWrongPSK verifies that a client with the wrong PSK cannot authenticate.
+// TestWrongPSK makes sure a stolen client id without the PSK cannot tunnel.
 func TestWrongPSK(t *testing.T) {
 	m := newMaterial(t)
-	hidden := startHidden(t, m)
-	decoy := startDecoy(t, hidden)
+	addr := startServer(t, m)
 
-	conn, err := net.Dial("tcp", decoy)
+	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
 	}

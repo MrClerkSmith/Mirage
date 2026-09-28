@@ -1,5 +1,5 @@
-// Package conf defines and validates the JSON configuration for the client,
-// the hidden VPN server and the decoy relay.
+// Package conf defines and validates the JSON configuration for the client
+// and the server.
 package conf
 
 import (
@@ -20,24 +20,23 @@ type ClientConfig struct {
 	// (userspace SOCKS5 proxy, no driver needed).
 	Mode string `json:"mode"`
 
-	// Visible destination the DPI will see: the decoy endpoint, e.g.
-	// "203.0.113.10:443". The connection is really relayed by that host to the
-	// hidden VPN server.
-	DecoyAddr string `json:"decoy_addr"`
+	// The only host the client ever talks to, e.g. "203.0.113.10:443". This is
+	// the address the DPI sees; the server behind it is the VPN endpoint.
+	ServerAddr string `json:"server_addr"`
 
-	// SNI sent in the TLS ClientHello. Must match the decoy's tunnel_domain and
-	// the certificate the real server presents.
-	DecoyDomain string `json:"decoy_domain"`
+	// SNI sent in the TLS ClientHello. Must match the domain on the server's
+	// certificate.
+	ServerDomain string `json:"server_domain"`
 
 	// Pre-shared key and its id (base64, 32 bytes) used for the inner
 	// authenticated handshake.
 	PSK   string `json:"psk"`
 	PSKID string `json:"psk_id"`
 
-	// Pinned X25519 static public key of the hidden server (base64, 32 bytes).
+	// Pinned X25519 static public key of the server (base64, 32 bytes).
 	ServerX25519Pub string `json:"server_x25519_pub"`
 
-	// SHA-256 of the DER certificate presented by the hidden server (hex).
+	// SHA-256 of the DER certificate presented by the server (hex).
 	// Replaces the normal CA chain: no public CA is involved.
 	ServerCertSHA256 string `json:"server_cert_sha256"`
 
@@ -57,15 +56,14 @@ type ClientConfig struct {
 	RekeyRecords int `json:"rekey_records"` // rekey every N records, 0 = never
 }
 
-// ServerConfig configures the hidden VPN server.
+// ServerConfig configures the VPN server. It is the single public endpoint:
+// every connection does a real TLS handshake, then either the inner tunnel
+// handshake or, for anyone else, the cover website.
 type ServerConfig struct {
-	// Where it accepts relayed tunnel connections. Firewalled so only the
-	// decoy can reach it, e.g. "127.0.0.1:8443" on the same host or a private
-	// address of a second host.
+	// Public listener, e.g. ":443".
 	Listen string `json:"listen"`
 
-	// TLS certificate for the decoy domain (presented to the client through the
-	// relay) and its private key, PEM files.
+	// TLS certificate for the server domain and its private key, PEM files.
 	TLSCert string `json:"tls_cert"`
 	TLSKey  string `json:"tls_key"`
 
@@ -96,19 +94,9 @@ type ServerConfig struct {
 	// Directory served as a cover website to anything that is not an
 	// authenticated client (probes, scanners). Optional.
 	CoverDir string `json:"cover_dir"`
-}
 
-// DecoyConfig configures the public, DPI-visible relay.
-type DecoyConfig struct {
-	Listen       string `json:"listen"`        // e.g. ":443"
-	TunnelDomain string `json:"tunnel_domain"` // SNI that is relayed to the real server
-	ServerAddr   string `json:"server_addr"`   // the HIDDEN server, e.g. "10.0.0.2:8443"
-
-	// Cover website served for every other SNI / non-TLS client.
-	CoverCert  string `json:"cover_cert"`  // PEM cert for the decoy domain
-	CoverKey   string `json:"cover_key"`   // PEM key
-	CoverDir   string `json:"cover_dir"`   // static files to serve (optional)
-	CoverProxy string `json:"cover_proxy"` // upstream to reverse-proxy (optional)
+	// Optional upstream to reverse-proxy as the cover site.
+	CoverProxy string `json:"cover_proxy"`
 }
 
 // Load reads and validates a JSON config file. Relative paths inside the config
@@ -129,11 +117,6 @@ func Load(path string, v interface{}) error {
 	case *ServerConfig:
 		c.TLSCert = resolvePath(dir, c.TLSCert)
 		c.TLSKey = resolvePath(dir, c.TLSKey)
-		c.CoverDir = resolvePath(dir, c.CoverDir)
-		return c.Validate()
-	case *DecoyConfig:
-		c.CoverCert = resolvePath(dir, c.CoverCert)
-		c.CoverKey = resolvePath(dir, c.CoverKey)
 		c.CoverDir = resolvePath(dir, c.CoverDir)
 		return c.Validate()
 	}
@@ -157,11 +140,11 @@ func (c *ClientConfig) Validate() error {
 	default:
 		return fmt.Errorf("mode must be tun or socks, got %q", c.Mode)
 	}
-	if c.DecoyAddr == "" {
-		return errors.New("decoy_addr is required")
+	if c.ServerAddr == "" {
+		return errors.New("server_addr is required")
 	}
-	if c.DecoyDomain == "" {
-		return errors.New("decoy_domain is required")
+	if c.ServerDomain == "" {
+		return errors.New("server_domain is required")
 	}
 	if _, err := DecodePSK(c.PSK); err != nil {
 		return fmt.Errorf("psk: %w", err)
@@ -217,20 +200,6 @@ func (c *ServerConfig) Validate() error {
 	}
 	if c.TunName == "" {
 		c.TunName = "mirage-srv"
-	}
-	return nil
-}
-
-// Validate checks the decoy config.
-func (c *DecoyConfig) Validate() error {
-	if c.Listen == "" {
-		return errors.New("listen is required")
-	}
-	if c.TunnelDomain == "" {
-		return errors.New("tunnel_domain is required")
-	}
-	if c.ServerAddr == "" {
-		return errors.New("server_addr (the hidden server) is required")
 	}
 	return nil
 }

@@ -1,5 +1,5 @@
 {
-  "listen": "127.0.0.1:8443",
+  "listen": ":443",
   "tls_cert": "server.pem",
   "tls_key": "server-key.pem",
   "tunnel_cidr": "10.7.0.0/24",
@@ -14,5 +14,6 @@
   "idle_ping_sec": 30,
   "psks": { "REPLACE_WITH_PSK_ID": "REPLACE_WITH_BASE64_PSK" },
   "x25519_priv": "REPLACE_WITH_BASE64_STATIC_PRIVKEY",
-  "cover_dir": ""
+  "cover_dir": "",
+  "cover_proxy": ""
 }

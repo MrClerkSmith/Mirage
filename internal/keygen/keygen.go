@@ -22,10 +22,9 @@ import (
 // Options tweaks the generated material.
 type Options struct {
 	Dir          string // output directory
-	Domain       string // decoy domain (tunnel SNI)
-	DecoyAddr    string // where the client connects, "host:443"
-	ServerAddr   string // where the decoy reaches the hidden server
-	ServerListen string // where the hidden server listens
+	Domain       string // server domain (tunnel SNI + certificate name)
+	ServerAddr   string // where the client connects, "host:443"
+	ServerListen string // where the server listens, e.g. ":443"
 	TunnelCIDR   string
 	DNSUpstream  string
 }
@@ -38,14 +37,11 @@ func Generate(o Options) error {
 	if o.Dir == "" {
 		o.Dir = "keys"
 	}
-	if o.DecoyAddr == "" {
-		o.DecoyAddr = "DECOY_HOST_OR_IP:443"
-	}
 	if o.ServerAddr == "" {
-		o.ServerAddr = "127.0.0.1:8443"
+		o.ServerAddr = "YOUR_SERVER_IP:443"
 	}
 	if o.ServerListen == "" {
-		o.ServerListen = "127.0.0.1:8443"
+		o.ServerListen = ":443"
 	}
 	if o.TunnelCIDR == "" {
 		o.TunnelCIDR = "10.7.0.0/24"
@@ -99,8 +95,8 @@ func Generate(o Options) error {
 
 	clientConf := conf.ClientConfig{
 		Mode:             "tun",
-		DecoyAddr:        o.DecoyAddr,
-		DecoyDomain:      o.Domain,
+		ServerAddr:       o.ServerAddr,
+		ServerDomain:     o.Domain,
 		PSK:              base64.StdEncoding.EncodeToString(psk),
 		PSKID:            id,
 		ServerX25519Pub:  base64.StdEncoding.EncodeToString(static.PublicKey().Bytes()),
@@ -132,21 +128,12 @@ func Generate(o Options) error {
 		PSKs:         map[string]string{id: base64.StdEncoding.EncodeToString(psk)},
 		X25519Priv:   base64.StdEncoding.EncodeToString(static.Bytes()),
 		CoverDir:     "",
-	}
-	decoyConf := conf.DecoyConfig{
-		Listen:       ":443",
-		TunnelDomain: o.Domain,
-		ServerAddr:   o.ServerAddr,
-		CoverCert:    "",
-		CoverKey:     "",
-		CoverDir:     "",
 		CoverProxy:   "",
 	}
 
 	for name, v := range map[string]interface{}{
 		"client.json": clientConf,
 		"server.json": serverConf,
-		"decoy.json":  decoyConf,
 	} {
 		b, err := json.MarshalIndent(v, "", "  ")
 		if err != nil {
@@ -165,7 +152,7 @@ func Generate(o Options) error {
 
 	log.Printf("keygen: wrote %s", o.Dir)
 	log.Printf("keygen: certificate for %q pinned by %s", o.Domain, pin)
-	log.Printf("keygen: remember to set decoy_addr (%s) and server_addr (%s) to real hosts",
-		o.DecoyAddr, o.ServerAddr)
+	log.Printf("keygen: set server_addr (%s) to the real host before running the client",
+		o.ServerAddr)
 	return nil
 }

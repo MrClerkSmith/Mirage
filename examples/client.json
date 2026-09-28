@@ -1,7 +1,7 @@
 {
   "mode": "tun",
-  "decoy_addr": "203.0.113.10:443",
-  "decoy_domain": "decoy.example.com",
+  "server_addr": "203.0.113.10:443",
+  "server_domain": "example.com",
   "psk": "REPLACE_WITH_BASE64_PSK_FROM_psks",
   "psk_id": "REPLACE_WITH_PSK_ID",
   "server_x25519_pub": "REPLACE_WITH_BASE64_STATIC_PUBKEY",

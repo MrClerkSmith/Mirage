@@ -1,16 +1,13 @@
 // Package cover serves the ordinary-looking website that any non-client sees
-// when it connects to the decoy (or to the hidden server without a valid
-// handshake). To an active DPI probe the service behaves exactly like a small
-// HTTPS host.
+// when it connects to the server without a valid tunnel handshake. To an
+// active DPI probe the service behaves exactly like a small HTTPS host.
 package cover
 
 import (
 	"bytes"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -44,12 +41,11 @@ const defaultPage = `<!doctype html>
 
 // Site is the cover website.
 type Site struct {
-	tlsConf *tls.Config
 	handler http.Handler
 }
 
-// New builds a site. tlsConf may be nil, in which case plain HTTP is served.
-func New(tlsConf *tls.Config, dir string, proxyTarget string) (*Site, error) {
+// New builds a site: a reverse proxy, a static directory, or the built-in page.
+func New(dir string, proxyTarget string) (*Site, error) {
 	var h http.Handler
 	switch {
 	case proxyTarget != "":
@@ -64,7 +60,7 @@ func New(tlsConf *tls.Config, dir string, proxyTarget string) (*Site, error) {
 	default:
 		h = http.HandlerFunc(serveDefault)
 	}
-	return &Site{tlsConf: tlsConf, handler: h}, nil
+	return &Site{handler: h}, nil
 }
 
 func serveDefault(w http.ResponseWriter, r *http.Request) {
@@ -74,29 +70,9 @@ func serveDefault(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, defaultPage)
 }
 
-// ServeWithReplay handles one connection that is not yet speaking TLS: it
-// performs the cover TLS handshake first, replaying the bytes a sniffer
-// already consumed. Used by the decoy.
-func (s *Site) ServeWithReplay(conn net.Conn, replay []byte) {
-	if s.tlsConf == nil {
-		s.ServeExisting(conn, replay)
-		return
-	}
-	var c net.Conn = conn
-	if len(replay) > 0 {
-		c = &peekConn{r: io.MultiReader(bytes.NewReader(replay), conn), Conn: conn}
-	}
-	tlsConn := tls.Server(c, s.tlsConf)
-	if err := tlsConn.Handshake(); err != nil {
-		log.Printf("cover: tls handshake failed: %v", err)
-		return
-	}
-	http.Serve(&singleConnListener{conn: tlsConn}, s.handler)
-}
-
 // ServeExisting serves the website over a connection whose TLS handshake has
-// already completed, replaying the bytes the handshake peeked. Used by the
-// hidden server for anything that fails the tunnel handshake.
+// already completed, replaying the bytes the inner handshake peeked. Used by
+// the server for anything that fails to authenticate as a tunnel client.
 func (s *Site) ServeExisting(conn net.Conn, replay []byte) {
 	var c net.Conn = conn
 	if len(replay) > 0 {

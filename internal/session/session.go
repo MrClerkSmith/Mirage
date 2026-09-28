@@ -169,7 +169,7 @@ func (c *Client) fail(err error) {
 
 // ---------- server side ----------
 
-// Server is one relayed client on the VPN server. Packets it sends are injected
+// Server is one tunneled client on the VPN server. Packets it sends are injected
 // into the shared TUN; packets routed back to it are delivered with Send.
 type Server struct {
 	FC        *record.FramedConn

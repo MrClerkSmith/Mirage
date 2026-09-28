@@ -1,6 +1,6 @@
-// Package certs generates the internal CA, the server certificate and the
-// decoy cover certificate. Using an internal CA plus client-side pinning means
-// no public CA ever learns which domain the tunnel speaks.
+// Package certs generates the internal CA and the server certificate. Using an
+// internal CA plus client-side pinning means no public CA ever learns which
+// domain the tunnel speaks.
 package certs
 
 import (

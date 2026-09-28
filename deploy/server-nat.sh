@@ -1,5 +1,5 @@
 #!/bin/sh
-# Mirage hidden server: enable forwarding and NAT for the tunnel subnet.
+# Mirage server: enable forwarding and NAT for the tunnel subnet.
 #
 # Usage:  ./server-nat.sh up          (or: down)
 #

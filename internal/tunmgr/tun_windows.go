@@ -29,7 +29,7 @@ func (d *Device) configure(addr string, dns []string, routes []string, defaultRo
 
 	if defaultRoute {
 		if preserveHost == "" {
-			return fmt.Errorf("tunmgr: default_route needs the decoy host to preserve a direct route")
+			return fmt.Errorf("tunmgr: default_route needs the server host to preserve a direct route")
 		}
 		if err := run("netsh", "interface", "ip", "set", "address",
 			"name="+d.name, "source=static", "addr="+ip, "mask="+maskFor(prefix),

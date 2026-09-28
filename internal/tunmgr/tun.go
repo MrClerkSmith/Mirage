@@ -27,7 +27,7 @@ type Device struct {
 // Create brings the interface up with the given address. Routes is the list of
 // CIDRs routed into the tunnel; when defaultRoute is set, 0.0.0.0/0 (and ::/0)
 // is routed through the tunnel while preserveHost keeps a direct route to the
-// decoy endpoint so the tunnel itself does not recurse.
+// server endpoint so the tunnel itself does not recurse.
 func Create(name string, mtu int, addr string, dns []string, routes []string, defaultRoute bool, preserveHost string) (*Device, error) {
 	if mtu <= 0 {
 		mtu = 1400

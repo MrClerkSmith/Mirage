@@ -10,7 +10,7 @@ import (
 func TestRFC5869A1(t *testing.T) {
 	ikm, _ := hex.DecodeString("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b")
 	salt, _ := hex.DecodeString("000102030405060708090a0b0c")
-	info, _ := hex.DecodeString("0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f")
+	info, _ := hex.DecodeString("f0f1f2f3f4f5f6f7f8f9")
 	want, _ := hex.DecodeString("3cb25f25faacd57a90434f64d0362f2a" +
 		"2d2d0a90cf1a5a4c5db02d56ecc4c5bf" +
 		"34007208d5b887185865")
@@ -23,6 +23,27 @@ func TestRFC5869A1(t *testing.T) {
 	got := Expand(prk, info, 42)
 	if !bytes.Equal(got, want) {
 		t.Fatalf("expand: got %x, want %x", got, want)
+	}
+}
+
+// RFC 5869 A.3: zero-length salt exercises the HashLen-zeros fallback, and
+// zero-length info exercises the expand loop with an empty context.
+func TestRFC5869A3(t *testing.T) {
+	ikm, _ := hex.DecodeString("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b")
+	wantPRK, _ := hex.DecodeString("19ef24a32c717b167f33a91d6f648bdf96596776afdb6377ac434c1c293ccb04")
+	want, _ := hex.DecodeString("8da4e775a563c18f715f802a063c5a31" +
+		"b8a11f5c5ee1879ec3454e5f3c738d2d" +
+		"9d201395faa4b61a96c8")
+
+	prk := Extract(nil, ikm)
+	if !bytes.Equal(prk, wantPRK) {
+		t.Fatalf("extract: got %x, want %x", prk, wantPRK)
+	}
+	if got := Expand(prk, nil, 42); !bytes.Equal(got, want) {
+		t.Fatalf("expand: got %x, want %x", got, want)
+	}
+	if got := Derive(nil, ikm, nil, 42); !bytes.Equal(got, want) {
+		t.Fatalf("derive: got %x, want %x", got, want)
 	}
 }
 

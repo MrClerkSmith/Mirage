@@ -1,8 +1,9 @@
-// Package server is the hidden VPN endpoint. It accepts only connections that
-// arrive through the decoy relay (or another trusted path), terminates the TLS
-// tunnel, authenticates the inner handshake and bridges the client to the
-// internet through a shared TUN interface. Anything that fails authentication
-// is served the cover website, so the port looks like an ordinary web host.
+// Package server is the public VPN endpoint and the only host a client or the
+// DPI ever sees. Every connection does a real TLS handshake with the server
+// domain certificate, then either completes the inner tunnel handshake and is
+// bridged to the internet through a shared TUN interface, or — for anything
+// that does not authenticate (browsers, scanners, active probes) — is served
+// the cover website, so the port looks like an ordinary web host.
 package server
 
 import (
@@ -87,7 +88,7 @@ func New(cfg *conf.ServerConfig) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	site, err := cover.New(tlsConf, cfg.CoverDir, "")
+	site, err := cover.New(cfg.CoverDir, cfg.CoverProxy)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +130,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("server: listening on %s (expecting relayed traffic)", s.cfg.Listen)
+	log.Printf("server: listening on %s (tunnel SNI %s)", s.cfg.Listen, s.tlsConf.ServerName)
 
 	go func() {
 		<-ctx.Done()

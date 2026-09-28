@@ -1,4 +1,4 @@
-// Package client connects to the decoy and runs the tunnel, reconnecting with
+// Package client connects to the server and runs the tunnel, reconnecting with
 // backoff when the link drops.
 package client
 
@@ -72,15 +72,15 @@ func (c *Client) Run(ctx context.Context) error {
 // connect establishes one full session and pumps it until it ends.
 func (c *Client) connect(ctx context.Context) error {
 	d := net.Dialer{Timeout: connectTimeout}
-	tcp, err := d.DialContext(ctx, "tcp", c.cfg.DecoyAddr)
+	tcp, err := d.DialContext(ctx, "tcp", c.cfg.ServerAddr)
 	if err != nil {
-		return fmt.Errorf("dial decoy: %w", err)
+		return fmt.Errorf("dial server: %w", err)
 	}
 
-	tlsConn := tls.Client(tcp, tlscam.ClientConfig(c.cfg.DecoyDomain, c.cfg.ServerCertSHA256))
+	tlsConn := tls.Client(tcp, tlscam.ClientConfig(c.cfg.ServerDomain, c.cfg.ServerCertSHA256))
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		tcp.Close()
-		return fmt.Errorf("tls handshake with decoy: %w", err)
+		return fmt.Errorf("tls handshake with server: %w", err)
 	}
 
 	psk, err := conf.DecodePSK(c.cfg.PSK)
@@ -109,7 +109,7 @@ func (c *Client) connect(ctx context.Context) error {
 		return fmt.Errorf("inner handshake: %w", err)
 	}
 	log.Printf("client: tunneled via %s as %s (dns %s, mtu %d)",
-		c.cfg.DecoyAddr, info.AssignedIP, info.DNS, info.MTU)
+		c.cfg.ServerAddr, info.AssignedIP, info.DNS, info.MTU)
 
 	var dev *tunmgr.Device
 	var socksAddr string
@@ -124,9 +124,9 @@ func (c *Client) connect(ctx context.Context) error {
 		if c.cfg.DNSViaTunnel && info.DNS != "" {
 			dns = []string{info.DNS}
 		}
-		preserveHost, _, perr := net.SplitHostPort(c.cfg.DecoyAddr)
+		preserveHost, _, perr := net.SplitHostPort(c.cfg.ServerAddr)
 		if perr != nil {
-			preserveHost = c.cfg.DecoyAddr
+			preserveHost = c.cfg.ServerAddr
 		}
 		dev, err = tunmgr.Create(c.cfg.TunName, mtu, info.AssignedIP, dns,
 			c.cfg.Routes, c.cfg.DefaultRoute, preserveHost)
