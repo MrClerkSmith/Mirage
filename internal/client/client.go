@@ -6,9 +6,11 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"time"
 
 	"mirage/internal/conf"
@@ -119,6 +121,9 @@ func (c *Client) connect(ctx context.Context) error {
 		return fmt.Errorf("transport %s: %w", c.kind, err)
 	}
 
+	log.Printf("client: connected to %s (transport=%s, sni=%s, psk_id=%s)",
+		c.cfg.ServerAddr, c.kind, c.Domain(), c.cfg.PSKID)
+
 	psk, err := conf.DecodePSK(c.cfg.PSK)
 	if err != nil {
 		tcp.Close()
@@ -142,6 +147,15 @@ func (c *Client) connect(ctx context.Context) error {
 	}, c.cfg.PadMin, c.cfg.RekeyRecords)
 	if err != nil {
 		tcp.Close()
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			// TLS worked but the server never answered the inner handshake:
+			// the client is talking to a TLS endpoint that is not running the
+			// tunnel on this transport, or the PSK does not match.
+			return fmt.Errorf("inner handshake: the server accepted TLS but sent no answer "+
+				"(transport=%s, sni=%s, psk_id=%s): check that the client's transport matches "+
+				"the server's inbound and that the PSK/psk_id are correct: %w",
+				c.kind, c.Domain(), c.cfg.PSKID, err)
+		}
 		return fmt.Errorf("inner handshake: %w", err)
 	}
 	log.Printf("client: tunneled via %s as %s (dns %s, mtu %d)",

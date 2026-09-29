@@ -224,6 +224,29 @@ main() {
 	echo "  manage clients and inbounds:  mirage-admin -c /etc/mirage/server.json"
 	echo "  client configs land in:       /etc/mirage/clients/<id>.json"
 	echo "  logs:                         journalctl -u mirage-server -f"
+
+	print_client_config
+}
+
+print_client_config() {
+	cfg="$CONFIG_DIR/client.json"
+	[ -f "$cfg" ] || cfg="$CONFIG_DIR/clients/$(ls -1 "$CONFIG_DIR/clients" 2>/dev/null | head -n 1)"
+	[ -f "$cfg" ] || return 0
+
+	echo
+	log "the client config (one line, safe to paste):"
+	if command -v base64 >/dev/null 2>&1; then
+		b64=$(base64 -w 0 "$cfg" 2>/dev/null || base64 "$cfg" | tr -d '\n')
+		echo "$b64"
+		echo
+		log "on the client machine:"
+		echo "  Linux/mac:  curl -fsSL https://raw.githubusercontent.com/MrClerkSmith/Mirage/main/deploy/install-client.sh | sudo sh"
+		echo "  Windows:    powershell -c \"irm https://raw.githubusercontent.com/MrClerkSmith/Mirage/main/deploy/install-client.ps1 | iex\""
+		echo
+		echo "then paste the line above when the installer asks for the config."
+	else
+		echo "$cfg"
+	fi
 }
 
 main "$@"

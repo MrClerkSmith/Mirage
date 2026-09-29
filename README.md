@@ -136,6 +136,35 @@ Main menu
 Изменения пишутся на диск только через «Save & exit». Если `server.json` ещё не
 существует, TUI спросит хост и домен и создаст всё с нуля.
 
+## Клиент одной командой
+
+На сервере `install.sh` в конце печатает конфиг клиента одной строкой base64.
+На компьютере запустите установщик в консоли **от администратора** и вставьте
+эту строку — он поставит Go, соберёт клиент, сохранит конфиг и установит службу:
+
+```sh
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/MrClerkSmith/Mirage/main/deploy/install-client.sh | sudo sh
+
+# Windows (PowerShell от администратора)
+powershell -c "irm https://raw.githubusercontent.com/MrClerkSmith/Mirage/main/deploy/install-client.ps1 | iex"
+```
+
+То же самое неинтерактивно:
+
+```sh
+sh install-client.sh -b64 "eyJtb2RlIj..."     # конфиг одной строкой
+sh install-client.sh -c /home/me/home.json    # готовый файл
+sh install-client.sh -foreground              # запустить в окне, чтобы видеть логи
+```
+
+Если конфиг нужен не для первого клиента — выгрузите его на сервере:
+
+```sh
+mirage-admin -c /etc/mirage/server.json export home -b64    # одной строкой
+mirage-admin -c /etc/mirage/server.json export home         # красивым JSON
+```
+
 ## Подключение клиента с компьютера
 
 1. На сервере создайте клиента и выгрузите его конфиг (см. раздел выше) —
@@ -154,6 +183,35 @@ mirage.exe client -c home.json
 
 Проверка: `ping 10.7.0.1` отвечает серверу туннеля, а любой IP-чекер
 покажет адрес сервера, а не ваш.
+
+## Если клиент не подключается
+
+```sh
+client: connected to host:443 (transport=raw, sni=example.com, psk_id=home)
+client: tunnel down: inner handshake: the server accepted TLS but sent no answer
+```
+
+TLS прошёл (значит, адрес и сертификат верные), а внутренний хендшейк не
+состоялся. Причины:
+
+1. **Несовпадение транспорта.** Клиент с `transport=raw` подключился к inbound
+   с `transport=ws` (сервер ждёт HTTP-запрос, а получает зашифрованные байты).
+   Транспорт клиента должен совпадать с транспортом inbound. Проверяется
+   выводом выше или командой `-transport ws` для пробы.
+2. **Несовпадение PSK.** Сервер расшифровать не смог и отдал cover-сайт —
+   пересоздайте клиента в `mirage-admin` и выгрузите конфиг заново.
+3. **Старый конфиг.** После перегенерации ключей все старые конфиги клиентов
+   недействительны.
+
+Другие частые ошибки:
+
+* `tls handshake with server: certificate pin mismatch` — конфиг от другого
+  сервера.
+* `dial tcp: connect: connection refused` — не открыт 443/tcp (проверьте
+  `deploy/server-nat.sh`, cloud-фаервол и `ufw`).
+* `route add` на Windows от обычного пользователя — нужен запуск от
+  администратора. Если клиент прибили насильно и маршруты остались,
+  запустите `deploy/win-cleanup.txt` от администратора.
 
 ## Режимы клиента
 
