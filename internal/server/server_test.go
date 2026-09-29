@@ -1,23 +1,32 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"net"
 	"testing"
 
 	"mirage/internal/certs"
+	"mirage/internal/control"
+	"mirage/internal/cover"
 	"mirage/internal/handshake"
 	"mirage/internal/proto"
+	"mirage/internal/record"
 	"mirage/internal/tlscam"
+	"mirage/internal/transport"
 )
 
-const testDomain = "mirage.test"
+const (
+	testDomain = "mirage.test"
+	testPath   = "/mirage"
+)
 
 type testMaterial struct {
 	cert        tls.Certificate
@@ -51,14 +60,42 @@ func newMaterial(t *testing.T) *testMaterial {
 	}
 }
 
-// startServer mimics Server.handle without touching TUN: it performs the same
-// TLS handshake, inner handshake and welcome, then echoes every record back.
-func startServer(t *testing.T, m *testMaterial) string {
+// startServer mimics Server.handle without touching TUN: TLS handshake, then
+// the chosen outer transport, the inner handshake, the welcome, and an echo of
+// every record back to the client.
+func startServer(t *testing.T, m *testMaterial, kind transport.Kind) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
+	site, err := cover.New("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runTunnel := func(stream net.Conn) {
+		fc, _, _, err := handshake.Server(stream, handshake.ServerParams{
+			PSKs:       map[string][]byte{"client1": m.psk},
+			StaticPriv: m.staticPriv,
+		}, 0, 0)
+		if err != nil {
+			return
+		}
+		if err := handshake.SendWelcome(fc, "10.7.0.2/24", "10.7.0.1", 1400); err != nil {
+			return
+		}
+		for {
+			rtype, payload, err := fc.ReadRecord()
+			if err != nil {
+				return
+			}
+			if err := fc.WriteRecord(rtype, payload); err != nil {
+				return
+			}
+		}
+	}
+
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -75,50 +112,33 @@ func startServer(t *testing.T, m *testMaterial) string {
 				if err := tlsConn.Handshake(); err != nil {
 					return
 				}
-				fc, _, _, err := handshake.Server(tlsConn, handshake.ServerParams{
-					PSKs:       map[string][]byte{"client1": m.psk},
-					StaticPriv: m.staticPriv,
-				}, 0, 0)
-				if err != nil {
+				if kind.IsHTTP() {
+					_ = transport.ServeHTTP(kind, tlsConn, testPath, site, runTunnel)
 					return
 				}
-				if err := handshake.SendWelcome(fc, "10.7.0.2/24", "10.7.0.1", 1400); err != nil {
-					return
-				}
-				for {
-					rtype, payload, err := fc.ReadRecord()
-					if err != nil {
-						return
-					}
-					if err := fc.WriteRecord(rtype, payload); err != nil {
-						return
-					}
-				}
+				runTunnel(tlsConn)
 			}()
 		}
 	}()
 	return ln.Addr().String()
 }
 
-// TestEndToEndTunnel drives the whole chain: TLS to the server, the inner
-// PSK+X25519 handshake through the pinned certificate, and a record round
-// trip.
-func TestEndToEndTunnel(t *testing.T) {
-	m := newMaterial(t)
-	addr := startServer(t, m)
-
-	conn, err := net.Dial("tcp", addr)
+// connect dials the server and returns an authenticated session.
+func connect(t *testing.T, addr string, m *testMaterial, kind transport.Kind) (*record.FramedConn, *control.WelcomeInfo) {
+	t.Helper()
+	tcp, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
-
-	tlsConn := tls.Client(conn, tlscam.ClientConfig(testDomain, m.fingerprint))
+	tlsConn := tls.Client(tcp, tlscam.ClientConfigALPN(testDomain, m.fingerprint, kind.ClientALPN()))
 	if err := tlsConn.Handshake(); err != nil {
 		t.Fatalf("tls handshake: %v", err)
 	}
-
-	fc, info, err := handshake.Client(tlsConn, handshake.ClientParams{
+	stream, err := transport.Dial(kind, tlsConn, testDomain, testPath)
+	if err != nil {
+		t.Fatalf("transport %s: %v", kind, err)
+	}
+	fc, info, err := handshake.Client(stream, handshake.ClientParams{
 		PSK:             m.psk,
 		PSKID:           "client1",
 		ServerX25519Pub: m.staticPub,
@@ -126,10 +146,12 @@ func TestEndToEndTunnel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inner handshake: %v", err)
 	}
-	if info.AssignedIP != "10.7.0.2/24" {
-		t.Fatalf("assigned ip: got %q, want 10.7.0.2/24", info.AssignedIP)
-	}
+	return fc, info
+}
 
+// roundTrip sends a record through the tunnel and expects it echoed back.
+func roundTrip(t *testing.T, fc *record.FramedConn) {
+	t.Helper()
 	msg := []byte("hello through the tunnel")
 	if err := fc.WriteRecord(proto.RecControl, msg); err != nil {
 		t.Fatal(err)
@@ -147,18 +169,93 @@ func TestEndToEndTunnel(t *testing.T) {
 	fc.Close()
 }
 
-// TestWrongPSK makes sure a stolen client id without the PSK cannot tunnel.
-func TestWrongPSK(t *testing.T) {
+func testTransport(t *testing.T, kind transport.Kind) {
 	m := newMaterial(t)
-	addr := startServer(t, m)
+	addr := startServer(t, m, kind)
+	fc, info := connect(t, addr, m, kind)
+	if info.AssignedIP != "10.7.0.2/24" {
+		t.Fatalf("assigned ip: got %q, want 10.7.0.2/24", info.AssignedIP)
+	}
+	roundTrip(t, fc)
+}
 
-	conn, err := net.Dial("tcp", addr)
+func TestEndToEndRaw(t *testing.T)  { testTransport(t, transport.Raw) }
+func TestEndToEndWS(t *testing.T)   { testTransport(t, transport.WS) }
+func TestEndToEndGRPC(t *testing.T) { testTransport(t, transport.GRPC) }
+
+// TestCoverOverWS checks that a plain HTTP request to a ws inbound is served
+// the cover website instead of the tunnel.
+func TestCoverOverWS(t *testing.T) {
+	m := newMaterial(t)
+	addr := startServer(t, m, transport.WS)
+
+	status, body := coverProbe(t, addr, "/other")
+	if status != "200" {
+		t.Fatalf("cover status: %q", status)
+	}
+	if !bytes.Contains(body, []byte("Mirage Networks")) {
+		t.Fatalf("cover body: %q", body)
+	}
+}
+
+// TestCoverOverGRPC checks that a plain HTTP request to a grpc inbound is
+// served the cover website instead of the tunnel.
+func TestCoverOverGRPC(t *testing.T) {
+	m := newMaterial(t)
+	addr := startServer(t, m, transport.GRPC)
+
+	status, body := coverProbe(t, addr, "/other")
+	if status != "200" {
+		t.Fatalf("cover status: %q", status)
+	}
+	if !bytes.Contains(body, []byte("Mirage Networks")) {
+		t.Fatalf("cover body: %q", body)
+	}
+}
+func coverProbe(t *testing.T, addr, path string) (string, []byte) {
+	t.Helper()
+	tcp, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer tcp.Close()
+	tlsConn := tls.Client(tcp, &tls.Config{
+		ServerName:         testDomain,
+		InsecureSkipVerify: true,
+		MinVersion:         tls.VersionTLS13,
+		NextProtos:         []string{"http/1.1"},
+	})
+	if err := tlsConn.Handshake(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Fprintf(tlsConn, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", path, testDomain); err != nil {
+		t.Fatal(err)
+	}
+	br := bufio.NewReader(tlsConn)
+	line, err := br.ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(br)
+	fields := bytes.SplitN([]byte(line), []byte(" "), 3)
+	if len(fields) < 2 {
+		t.Fatalf("bad status line: %q", line)
+	}
+	return string(fields[1]), body
+}
 
-	tlsConn := tls.Client(conn, tlscam.ClientConfig(testDomain, m.fingerprint))
+// TestWrongPSK makes sure a stolen client id without the PSK cannot tunnel.
+func TestWrongPSK(t *testing.T) {
+	m := newMaterial(t)
+	addr := startServer(t, m, transport.Raw)
+
+	tcp, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tcp.Close()
+
+	tlsConn := tls.Client(tcp, tlscam.ClientConfig(testDomain, m.fingerprint))
 	if err := tlsConn.Handshake(); err != nil {
 		t.Fatal(err)
 	}

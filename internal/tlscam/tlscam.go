@@ -17,12 +17,22 @@ import (
 
 // ClientConfig is the client's TLS configuration: it speaks TLS 1.3 to the
 // server domain and pins the server's certificate by SHA-256 instead of
-// trusting any public CA.
+// trusting any public CA. ALPN is negotiated for a raw tunnel.
 func ClientConfig(domain, pinHex string) *tls.Config {
+	return ClientConfigALPN(domain, pinHex, nil)
+}
+
+// ClientConfigALPN is ClientConfig with an explicit ALPN list, needed when the
+// tunnel rides on a transport that requires a particular negotiated protocol
+// (http/1.1 for WebSocket, h2 for gRPC).
+func ClientConfigALPN(domain, pinHex string, alpn []string) *tls.Config {
+	if len(alpn) == 0 {
+		alpn = []string{"h2", "http/1.1"}
+	}
 	return &tls.Config{
 		ServerName:         domain,
 		MinVersion:         tls.VersionTLS13,
-		NextProtos:         []string{"h2", "http/1.1"},
+		NextProtos:         alpn,
 		InsecureSkipVerify: true, // verification is the pin check below
 		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			if len(rawCerts) == 0 {
@@ -41,14 +51,22 @@ func ClientConfig(domain, pinHex string) *tls.Config {
 // ServerConfig is the server's TLS configuration. It presents the certificate
 // of the server domain.
 func ServerConfig(certFile, keyFile string) (*tls.Config, error) {
+	return ServerConfigALPN(certFile, keyFile, nil)
+}
+
+// ServerConfigALPN is ServerConfig with an explicit ALPN list.
+func ServerConfigALPN(certFile, keyFile string, alpn []string) (*tls.Config, error) {
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return nil, fmt.Errorf("tlscam: load key pair: %w", err)
 	}
+	if len(alpn) == 0 {
+		alpn = []string{"h2", "http/1.1"}
+	}
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS13,
-		NextProtos:   []string{"h2", "http/1.1"},
+		NextProtos:   alpn,
 	}, nil
 }
 

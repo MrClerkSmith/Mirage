@@ -21,7 +21,8 @@ func usage() {
 
 usage:
   mirage keygen  -domain example.com [-dir keys] [-server-addr host:443]
-  mirage client  -c client.json
+  mirage client  -c client.json [-sni other.example.com]
+                  [-transport raw|ws|grpc]
   mirage server  -c server.json
 `)
 }
@@ -79,11 +80,16 @@ func cmdKeygen(ctx context.Context) {
 func cmdClient(ctx context.Context) {
 	fs := flag.NewFlagSet("client", flag.ExitOnError)
 	config := fs.String("c", "client.json", "client config")
+	sni := fs.String("sni", "", "override the SNI/domain from the config")
+	tr := fs.String("transport", "", "override the outer transport: raw, ws or grpc")
 	fs.Parse(os.Args[2:])
 
 	cfg := &conf.ClientConfig{}
 	must(conf.Load(*config, cfg))
-	mustSignal(client.New(cfg).Run(ctx))
+	c := client.New(cfg)
+	must(c.SetTransport(*tr))
+	c.SetSNI(*sni)
+	mustSignal(c.Run(ctx))
 }
 
 func cmdServer(ctx context.Context) {

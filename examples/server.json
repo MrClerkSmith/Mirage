@@ -5,6 +5,8 @@
       "id": "main",
       "listen": ":443",
       "domain": "example.com",
+      "transport": "raw",
+      "path": "/mirage",
       "tls_cert": "server.pem",
       "tls_key": "server-key.pem",
       "cover_dir": "",

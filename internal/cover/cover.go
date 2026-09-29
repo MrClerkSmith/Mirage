@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sync"
+	"time"
 )
 
 const defaultPage = `<!doctype html>
@@ -70,6 +72,11 @@ func serveDefault(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, defaultPage)
 }
 
+// ServeHTTP serves the cover website to an ordinary HTTP request.
+func (s *Site) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handler.ServeHTTP(w, r)
+}
+
 // ServeExisting serves the website over a connection whose TLS handshake has
 // already completed, replaying the bytes the inner handshake peeked. Used by
 // the server for anything that fails to authenticate as a tunnel client.
@@ -78,8 +85,59 @@ func (s *Site) ServeExisting(conn net.Conn, replay []byte) {
 	if len(replay) > 0 {
 		c = &peekConn{r: io.MultiReader(bytes.NewReader(replay), conn), Conn: conn}
 	}
-	http.Serve(&singleConnListener{conn: c}, s.handler)
+	ln := newSingleConnListener(c)
+	srv := &http.Server{
+		Handler:     s.handler,
+		IdleTimeout: idleTimeout,
+		// Closing the connection once the response is flushed lets the single
+		// connection listener above unwind.
+		ConnState: func(_ net.Conn, state http.ConnState) {
+			if state == http.StateClosed {
+				ln.markDone()
+			}
+		},
+	}
+	srv.SetKeepAlivesEnabled(false)
+	_ = srv.Serve(ln)
 }
+
+// idleTimeout bounds how long a probe connection may linger.
+const idleTimeout = 60 * time.Second
+
+// singleConnListener serves exactly one already-accepted connection: Accept
+// hands it out once, then blocks until the connection is closed. Without the
+// block, http.Serve returns as soon as Accept fails a second time and closes
+// the connection before the response has been flushed.
+type singleConnListener struct {
+	conn   net.Conn
+	handed bool
+	once   sync.Once
+	done   chan struct{}
+}
+
+func newSingleConnListener(conn net.Conn) *singleConnListener {
+	return &singleConnListener{conn: conn, done: make(chan struct{})}
+}
+
+func (l *singleConnListener) Accept() (net.Conn, error) {
+	if !l.handed {
+		l.handed = true
+		return l.conn, nil
+	}
+	<-l.done
+	return nil, errors.New("cover: listener closed")
+}
+
+func (l *singleConnListener) markDone() {
+	l.once.Do(func() { close(l.done) })
+}
+
+func (l *singleConnListener) Close() error {
+	l.markDone()
+	return nil
+}
+
+func (l *singleConnListener) Addr() net.Addr { return l.conn.LocalAddr() }
 
 // peekConn overrides Read so already-buffered bytes are served first.
 type peekConn struct {
@@ -88,21 +146,3 @@ type peekConn struct {
 }
 
 func (c *peekConn) Read(b []byte) (int, error) { return c.r.Read(b) }
-
-// singleConnListener lets http.Serve serve exactly one already-accepted
-// connection: Accept hands it out once, then reports the listener as closed.
-type singleConnListener struct {
-	conn net.Conn
-	done bool
-}
-
-func (l *singleConnListener) Accept() (net.Conn, error) {
-	if l.done {
-		return nil, errors.New("cover: listener closed")
-	}
-	l.done = true
-	return l.conn, nil
-}
-
-func (l *singleConnListener) Close() error   { return l.conn.Close() }
-func (l *singleConnListener) Addr() net.Addr { return l.conn.LocalAddr() }

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"mirage/internal/proto"
+	"mirage/internal/transport"
 )
 
 // ClientConfig configures the machine that wants to reach the internet.
@@ -28,6 +29,12 @@ type ClientConfig struct {
 	// SNI sent in the TLS ClientHello. Must match the domain on the server's
 	// certificate.
 	ServerDomain string `json:"server_domain"`
+
+	// Outer transport: "raw" (records directly over TLS, default), "ws"
+	// (WebSocket frames) or "grpc" (gRPC messages over HTTP/2). Path is the
+	// endpoint used by ws/grpc.
+	Transport string `json:"transport"`
+	Path      string `json:"path"`
 
 	// Pre-shared key and its id (base64, 32 bytes) used for the inner
 	// authenticated handshake.
@@ -101,6 +108,10 @@ type ServerConfig struct {
 
 	// Static X25519 private key of the server (base64, 32 bytes).
 	X25519Priv string `json:"x25519_priv"`
+
+	// Defaults inherited by inbounds that do not set them.
+	Transport string `json:"transport"` // raw | ws | grpc
+	Path      string `json:"path"`      // tunnel endpoint for ws/grpc
 }
 
 // InboundConfig is one listening endpoint of the server.
@@ -108,6 +119,8 @@ type InboundConfig struct {
 	ID         string `json:"id"`          // short name, used by the admin tool
 	Listen     string `json:"listen"`      // e.g. ":443"
 	Domain     string `json:"domain"`      // SNI and certificate name
+	Transport  string `json:"transport"`   // raw | ws | grpc
+	Path       string `json:"path"`        // tunnel endpoint for ws/grpc
 	TLSCert    string `json:"tls_cert"`    // PEM file
 	TLSKey     string `json:"tls_key"`     // PEM file
 	CoverDir   string `json:"cover_dir"`   // optional static cover site
@@ -124,6 +137,8 @@ func (c *ServerConfig) InboundsOrDefault() []InboundConfig {
 		ID:         "default",
 		Listen:     c.Listen,
 		Domain:     c.Domain,
+		Transport:  c.Transport,
+		Path:       c.Path,
 		TLSCert:    c.TLSCert,
 		TLSKey:     c.TLSKey,
 		CoverDir:   c.CoverDir,
@@ -183,6 +198,14 @@ func (c *ClientConfig) Validate() error {
 	if c.ServerDomain == "" {
 		return errors.New("server_domain is required")
 	}
+	if c.Transport != "" {
+		if _, err := transport.Parse(c.Transport); err != nil {
+			return err
+		}
+	}
+	if c.Path == "" {
+		c.Path = transport.DefaultPath
+	}
 	if _, err := DecodePSK(c.PSK); err != nil {
 		return fmt.Errorf("psk: %w", err)
 	}
@@ -225,6 +248,18 @@ func (c *ServerConfig) Validate() error {
 		seen[in.ID] = true
 		if in.Listen == "" {
 			return fmt.Errorf("inbound %q: listen is required", in.ID)
+		}
+		if in.Transport == "" {
+			in.Transport = c.Transport
+		}
+		if _, err := transport.Parse(in.Transport); err != nil {
+			return fmt.Errorf("inbound %q: %w", in.ID, err)
+		}
+		if in.Path == "" {
+			in.Path = c.Path
+		}
+		if in.Path == "" {
+			in.Path = transport.DefaultPath
 		}
 		if in.TLSCert == "" || in.TLSKey == "" {
 			return fmt.Errorf("inbound %q: tls_cert and tls_key are required", in.ID)

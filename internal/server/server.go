@@ -24,8 +24,10 @@ import (
 	"mirage/internal/handshake"
 	"mirage/internal/mux"
 	"mirage/internal/proto"
+	"mirage/internal/record"
 	"mirage/internal/session"
 	"mirage/internal/tlscam"
+	"mirage/internal/transport"
 	"mirage/internal/tunmgr"
 )
 
@@ -47,6 +49,7 @@ type Server struct {
 // inbound is one listening endpoint with its own certificate and cover site.
 type inbound struct {
 	cfg   conf.InboundConfig
+	kind  transport.Kind
 	tls   *tls.Config
 	cover *cover.Site
 }
@@ -93,7 +96,11 @@ func New(cfg *conf.ServerConfig) (*Server, error) {
 
 	inbounds := make([]inbound, 0, len(cfg.InboundsOrDefault()))
 	for _, ic := range cfg.InboundsOrDefault() {
-		tlsConf, err := tlscam.ServerConfig(ic.TLSCert, ic.TLSKey)
+		kind, err := transport.Parse(ic.Transport)
+		if err != nil {
+			return nil, err
+		}
+		tlsConf, err := tlscam.ServerConfigALPN(ic.TLSCert, ic.TLSKey, kind.ServerALPN())
 		if err != nil {
 			return nil, err
 		}
@@ -101,7 +108,7 @@ func New(cfg *conf.ServerConfig) (*Server, error) {
 		if err != nil {
 			return nil, err
 		}
-		inbounds = append(inbounds, inbound{cfg: ic, tls: tlsConf, cover: site})
+		inbounds = append(inbounds, inbound{cfg: ic, kind: kind, tls: tlsConf, cover: site})
 	}
 
 	return &Server{
@@ -178,6 +185,16 @@ func (s *Server) handle(conn net.Conn, ib inbound) {
 		return
 	}
 
+	if ib.kind.IsHTTP() {
+		// The transport dispatches its own requests: the ones on the tunnel
+		// path are handed to serveStream, everything else gets the cover
+		// website.
+		_ = transport.ServeHTTP(ib.kind, tlsConn, ib.cfg.Path, ib.cover, func(stream net.Conn) {
+			s.serveStream(stream, ib)
+		})
+		return
+	}
+
 	fc, info, peeked, err := handshake.Server(tlsConn, handshake.ServerParams{
 		PSKs:       s.psks,
 		StaticPriv: s.staticPriv,
@@ -191,7 +208,25 @@ func (s *Server) handle(conn net.Conn, ib inbound) {
 		log.Printf("server: handshake: %v", err)
 		return
 	}
+	s.serveSession(fc, info)
+}
 
+// serveStream runs the inner handshake over an already-upgraded transport
+// stream (WebSocket or gRPC).
+func (s *Server) serveStream(stream net.Conn, ib inbound) {
+	fc, info, _, err := handshake.Server(stream, handshake.ServerParams{
+		PSKs:       s.psks,
+		StaticPriv: s.staticPriv,
+	}, s.cfg.PadMin, s.cfg.RekeyRecords)
+	if err != nil {
+		log.Printf("server: handshake: %v", err)
+		return
+	}
+	s.serveSession(fc, info)
+}
+
+// serveSession admits one authenticated client and runs it to completion.
+func (s *Server) serveSession(fc *record.FramedConn, info *handshake.ClientInfo) {
 	ip, err := s.pool.Acquire()
 	if err != nil {
 		log.Printf("server: address pool exhausted")

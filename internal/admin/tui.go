@@ -45,6 +45,7 @@ const (
 	kindInboundID
 	kindInboundDomain
 	kindInboundListen
+	kindInboundTransport
 	kindInitHost
 	kindInitDomain
 )
@@ -267,7 +268,7 @@ func (m model) finishFlow() (tea.Model, tea.Cmd) {
 		m.message = "client " + vals[0] + " added (save to keep it)"
 		m.rebuildClients()
 	case kindInboundID:
-		if err := m.store.AddInbound(vals[0], vals[1], vals[2]); err != nil {
+		if err := m.store.AddInbound(vals[0], vals[1], vals[2], vals[3]); err != nil {
 			m.message = err.Error()
 			return m, nil
 		}
@@ -388,6 +389,7 @@ func (m model) updateInbounds(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			{kind: kindInboundID, prompt: "inbound id", placeholder: "e.g. second"},
 			{kind: kindInboundDomain, prompt: "domain (SNI)", placeholder: "cdn.example.com"},
 			{kind: kindInboundListen, prompt: "listen address", placeholder: ":443", fallback: ":443"},
+			{kind: kindInboundTransport, prompt: "transport (raw/ws/grpc)", placeholder: "raw", fallback: "raw"},
 		}
 		m.input = textInput{placeholder: m.steps[0].placeholder}
 	case "d":
@@ -448,7 +450,7 @@ func (m *model) rebuildInbounds() {
 	for _, in := range m.store.Inbounds() {
 		items = append(items, listItem{
 			id:   in.ID,
-			text: fmt.Sprintf("%-10s %-12s %s", in.ID, in.Listen, in.Domain),
+			text: fmt.Sprintf("%-10s %-12s %-8s %s", in.ID, in.Listen, in.Transport, in.Domain),
 		})
 	}
 	m.list = list{items: items}

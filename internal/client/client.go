@@ -16,6 +16,7 @@ import (
 	"mirage/internal/mux"
 	"mirage/internal/session"
 	"mirage/internal/tlscam"
+	"mirage/internal/transport"
 	"mirage/internal/tunmgr"
 )
 
@@ -27,12 +28,41 @@ const (
 
 // Client owns one configured tunnel.
 type Client struct {
-	cfg *conf.ClientConfig
+	cfg  *conf.ClientConfig
+	kind transport.Kind
+	sni  string // overrides cfg.ServerDomain when set
 }
 
 // New creates the client.
 func New(cfg *conf.ClientConfig) *Client {
-	return &Client{cfg: cfg}
+	kind, _ := transport.Parse(cfg.Transport) // validated when the config loaded
+	return &Client{cfg: cfg, kind: kind}
+}
+
+// SetSNI overrides the SNI sent in the TLS ClientHello (and the HTTP Host
+// header of the ws/grpc transports). An empty value keeps the config's domain.
+func (c *Client) SetSNI(domain string) {
+	if domain != "" {
+		c.sni = domain
+	}
+}
+
+// SetTransport overrides the outer transport ("raw", "ws" or "grpc").
+func (c *Client) SetTransport(kind string) error {
+	k, err := transport.Parse(kind)
+	if err != nil {
+		return err
+	}
+	c.kind = k
+	return nil
+}
+
+// Domain returns the SNI that will be used for the next connection.
+func (c *Client) Domain() string {
+	if c.sni != "" {
+		return c.sni
+	}
+	return c.cfg.ServerDomain
 }
 
 // Run blocks until the context is cancelled, reconnecting as needed.
@@ -77,10 +107,16 @@ func (c *Client) connect(ctx context.Context) error {
 		return fmt.Errorf("dial server: %w", err)
 	}
 
-	tlsConn := tls.Client(tcp, tlscam.ClientConfig(c.cfg.ServerDomain, c.cfg.ServerCertSHA256))
+	tlsConn := tls.Client(tcp, tlscam.ClientConfigALPN(c.Domain(), c.cfg.ServerCertSHA256, c.kind.ClientALPN()))
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		tcp.Close()
 		return fmt.Errorf("tls handshake with server: %w", err)
+	}
+
+	stream, err := transport.Dial(c.kind, tlsConn, c.Domain(), c.cfg.Path)
+	if err != nil {
+		tcp.Close()
+		return fmt.Errorf("transport %s: %w", c.kind, err)
 	}
 
 	psk, err := conf.DecodePSK(c.cfg.PSK)
@@ -99,7 +135,7 @@ func (c *Client) connect(ctx context.Context) error {
 		return err
 	}
 
-	fc, info, err := handshake.Client(tlsConn, handshake.ClientParams{
+	fc, info, err := handshake.Client(stream, handshake.ClientParams{
 		PSK:             psk,
 		PSKID:           c.cfg.PSKID,
 		ServerX25519Pub: serverPub,

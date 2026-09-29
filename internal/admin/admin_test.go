@@ -78,7 +78,7 @@ func TestClients(t *testing.T) {
 func TestInboundAndExport(t *testing.T) {
 	s, dir := newStore(t)
 
-	must2(t, s.AddInbound("second", "cdn.mirage.test", ":8443"))
+	must2(t, s.AddInbound("second", "cdn.mirage.test", ":8443", "ws"))
 	in := s.Inbounds()
 	if len(in) != 2 || in[1].Domain != "cdn.mirage.test" {
 		t.Fatalf("inbounds: %+v", in)
@@ -103,6 +103,9 @@ func TestInboundAndExport(t *testing.T) {
 	}
 	if c.ServerDomain != "cdn.mirage.test" {
 		t.Fatalf("server_domain: got %q", c.ServerDomain)
+	}
+	if c.Transport != "ws" {
+		t.Fatalf("transport: got %q", c.Transport)
 	}
 	if c.PSKID != "alice" || c.PSK == "" || c.ServerCertSHA256 == "" {
 		t.Fatalf("client config incomplete: %+v", c)

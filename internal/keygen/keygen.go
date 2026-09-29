@@ -1,6 +1,6 @@
 // Package keygen produces everything a deployment needs: an internal CA, the
-// server certificate for the decoy domain, the PSK, the server's static X25519
-// key, and ready-to-edit JSON configs for the client, server and decoy.
+// server certificate for the domain, the PSK, the server's static X25519 key,
+// and ready-to-edit JSON configs for the client and the server.
 package keygen
 
 import (
@@ -18,6 +18,7 @@ import (
 	"mirage/internal/certs"
 	"mirage/internal/conf"
 	"mirage/internal/tlscam"
+	"mirage/internal/transport"
 )
 
 // Options tweaks the generated material.
@@ -98,6 +99,8 @@ func Generate(o Options) error {
 		Mode:             "tun",
 		ServerAddr:       o.ServerAddr,
 		ServerDomain:     o.Domain,
+		Transport:        string(transport.Raw),
+		Path:             transport.DefaultPath,
 		PSK:              base64.StdEncoding.EncodeToString(psk),
 		PSKID:            id,
 		ServerX25519Pub:  base64.StdEncoding.EncodeToString(static.PublicKey().Bytes()),
@@ -115,11 +118,13 @@ func Generate(o Options) error {
 	serverConf := conf.ServerConfig{
 		Host: hostOf(o.ServerAddr),
 		Inbounds: []conf.InboundConfig{{
-			ID:       "main",
-			Listen:   o.ServerListen,
-			Domain:   o.Domain,
-			TLSCert:  "server.pem",
-			TLSKey:   "server-key.pem",
+			ID:        "main",
+			Listen:    o.ServerListen,
+			Domain:    o.Domain,
+			Transport: string(transport.Raw),
+			Path:      transport.DefaultPath,
+			TLSCert:   "server.pem",
+			TLSKey:    "server-key.pem",
 		}},
 		TunnelCIDR:   o.TunnelCIDR,
 		IPStart:      "10.7.0.2",

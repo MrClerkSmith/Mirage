@@ -19,6 +19,7 @@ import (
 	"mirage/internal/conf"
 	"mirage/internal/keygen"
 	"mirage/internal/tlscam"
+	"mirage/internal/transport"
 )
 
 // Store wraps the server config file with edit operations.
@@ -137,7 +138,7 @@ func (s *Store) Inbounds() []conf.InboundConfig { return s.cfg.Inbounds }
 
 // AddInbound adds a listener and issues a self-signed certificate for the
 // domain, written next to the config file.
-func (s *Store) AddInbound(id, domain, listen string) error {
+func (s *Store) AddInbound(id, domain, listen, transportKind string) error {
 	if id == "" {
 		return errors.New("admin: empty inbound id")
 	}
@@ -146,6 +147,10 @@ func (s *Store) AddInbound(id, domain, listen string) error {
 	}
 	if listen == "" {
 		listen = ":443"
+	}
+	kind, err := transport.Parse(transportKind)
+	if err != nil {
+		return err
 	}
 	for _, in := range s.cfg.Inbounds {
 		if in.ID == id {
@@ -162,11 +167,13 @@ func (s *Store) AddInbound(id, domain, listen string) error {
 		return err
 	}
 	s.cfg.Inbounds = append(s.cfg.Inbounds, conf.InboundConfig{
-		ID:      id,
-		Listen:  listen,
-		Domain:  domain,
-		TLSCert: id + ".pem",
-		TLSKey:  id + "-key.pem",
+		ID:        id,
+		Listen:    listen,
+		Domain:    domain,
+		Transport: string(kind),
+		Path:      transport.DefaultPath,
+		TLSCert:   id + ".pem",
+		TLSKey:    id + "-key.pem",
 	})
 	return nil
 }
@@ -221,6 +228,8 @@ func (s *Store) ExportClient(clientID, inboundID string) (string, error) {
 		Mode:             "tun",
 		ServerAddr:       inboundAddr(s.cfg.Host, ib),
 		ServerDomain:     ib.Domain,
+		Transport:        ib.Transport,
+		Path:             ib.Path,
 		PSK:              pskB64,
 		PSKID:            clientID,
 		ServerX25519Pub:  base64.StdEncoding.EncodeToString(staticPriv.PublicKey().Bytes()),
