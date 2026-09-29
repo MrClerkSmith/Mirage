@@ -155,7 +155,7 @@ func (c *Client) connect(ctx context.Context) error {
 	}
 
 	switch c.cfg.Mode {
-	case "tun":
+	case "", "tun":
 		var dns []string
 		if c.cfg.DNSViaTunnel && info.DNS != "" {
 			dns = []string{info.DNS}

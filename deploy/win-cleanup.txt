@@ -3,10 +3,11 @@ rem Windows cleanup: removes Mirage routes if the client was hard-killed
 rem (e.g. power loss) and the interface is gone while routes remain.
 rem Run from an elevated command prompt.
 
-route delete 10.7.0.0 mask 255.255.0.0 >nul 2>&1
+route delete 10.7.0.0 mask 255.255.255.0 >nul 2>&1
 route delete 0.0.0.0 mask 0.0.0.0 10.7.0.1 >nul 2>&1
 
-rem Replace with the decoy host if you used default_route:
+rem If you used default_route, also remove the host route that keeps the
+rem direct path to the server (replace with your server's address):
 rem route delete 203.0.113.10 >nul 2>&1
 
 echo Mirage routes removed.
